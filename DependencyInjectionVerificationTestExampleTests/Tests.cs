@@ -22,7 +22,7 @@ namespace DependencyInjectionVerificationTestExampleTests
 
 		private static readonly Regex GenericOpenRegex = new(@"\`([0-9]+)\[", CompiledAndMultiline);
 
-		private static readonly ImmutableHashSet<Type> ExcludedTypes = new[]
+		private static readonly IImmutableSet<Type> ExcludedTypes = new[]
 			{
 				typeof(ILogger),
 				typeof(ILogger<>),

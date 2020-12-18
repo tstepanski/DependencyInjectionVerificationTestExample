@@ -22,6 +22,19 @@ namespace DependencyInjectionVerificationTestExampleTests
 
 		private static readonly Regex GenericOpenRegex = new(@"\`([0-9]+)\[", CompiledAndMultiline);
 
+		private static readonly ImmutableHashSet<Type> ExcludedTypes = new[]
+			{
+				typeof(ILogger),
+				typeof(ILogger<>),
+				typeof(IOptions<>),
+				typeof(IOptionsSnapshot<>),
+				typeof(IOptionsMonitor<>),
+				typeof(IOptionsFactory<>),
+				typeof(IOptionsMonitorCache<>),
+				typeof(Lazy<>)
+			}
+			.ToImmutableHashSet();
+
 		[Fact]
 		public Task Resolve_GivenHealthyRegistrar_ReturnsAnyRegisteredService()
 		{
@@ -36,26 +49,13 @@ namespace DependencyInjectionVerificationTestExampleTests
 
 		private static async Task RunResolveTest<TRegistrar>() where TRegistrar : IRegistrar, new()
 		{
-			var excludedTypes = new[]
-				{
-					typeof(ILogger),
-					typeof(ILogger<>),
-					typeof(IOptions<>),
-					typeof(IOptionsSnapshot<>),
-					typeof(IOptionsMonitor<>),
-					typeof(IOptionsFactory<>),
-					typeof(IOptionsMonitorCache<>),
-					typeof(Lazy<>)
-				}
-				.ToImmutableHashSet();
-			
 			IServiceCollection serviceCollection = new ServiceCollection();
 
 			serviceCollection = new TRegistrar().RegisterAll(serviceCollection);
 
 			var serviceTypes = serviceCollection
 				.Select(descriptor => descriptor.ServiceType)
-				.Where(type => excludedTypes.All(excludedType =>
+				.Where(type => ExcludedTypes.All(excludedType =>
 				{
 					if (!excludedType.IsAssignableFrom(type))
 					{
@@ -81,32 +81,11 @@ namespace DependencyInjectionVerificationTestExampleTests
 				var errorMessage = serviceTypes
 					.Select(serviceType =>
 					{
-						try
-						{
-							serviceProvider.GetService(serviceType);
+						var (success, serviceName) = TryToResolveType(serviceProvider, serviceType);
 
-							return string.Empty;
-						}
-						catch (InvalidOperationException exception)
-						{
-							failedToResolveDependency = true;
-							
-							var serviceNames = FailedDependencyResolutionMessageRegex
-								.Matches(exception.Message)
-								.First()
-								.Groups
-								.Values
-								.Skip(1)
-								.Select(typeNameCapture =>
-								{
-									var unformattedTypeName = typeNameCapture.Value.Replace(@"]", @">");
+						failedToResolveDependency = !success;
 
-									return GenericOpenRegex.Replace(unformattedTypeName, @"<");
-								})
-								.ToArray();
-
-							return $@"{serviceNames[0]} for type {serviceNames[1]}";
-						}
+						return serviceName;
 					})
 					.Where(typeName => !string.IsNullOrWhiteSpace(typeName))
 					.Aggregate(new StringBuilder($@"Could not resolve the following services:{Environment.NewLine}"),
@@ -116,6 +95,37 @@ namespace DependencyInjectionVerificationTestExampleTests
 					.ToString();
 
 				Assert.False(failedToResolveDependency, errorMessage);
+			}
+		}
+
+		private static (bool Success, string? ServiceName) TryToResolveType(IServiceProvider serviceProvider,
+			Type serviceType)
+		{
+			try
+			{
+				serviceProvider.GetService(serviceType);
+
+				return (true, null);
+			}
+			catch (InvalidOperationException exception)
+			{
+				var serviceNames = FailedDependencyResolutionMessageRegex
+					.Matches(exception.Message)
+					.First()
+					.Groups
+					.Values
+					.Skip(1)
+					.Select(typeNameCapture =>
+					{
+						var unformattedTypeName = typeNameCapture.Value.Replace(@"]", @">");
+
+						return GenericOpenRegex.Replace(unformattedTypeName, @"<");
+					})
+					.ToArray();
+
+				var serviceName = $@"{serviceNames[0]} for type {serviceNames[1]}";
+
+				return (false, serviceName);
 			}
 		}
 	}
